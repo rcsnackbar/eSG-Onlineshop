@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1B2B4C">
+<title>Bestellübersicht – RC-Snackbar eSG</title>
+<style>
+:root{--navy:#1B2B4C;--or:#E87722;--bd:#E2E8F0;--mut:#64748B;--ok:#2F855A}
+*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:#F8FAFC;color:#0F172A}
+header{background:var(--navy);color:#fff;padding:14px 20px;position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+header h1{font-size:1.1rem;margin:0}
+#st{font-size:.8rem;padding:4px 10px;border-radius:20px;background:#334155}
+#st.on{background:var(--ok)}
+nav{display:flex;gap:8px;padding:14px 16px 0;max-width:1000px;margin:auto;flex-wrap:wrap}
+nav button{border:1px solid var(--bd);background:#fff;border-radius:20px;padding:8px 16px;font-weight:600;color:var(--navy);cursor:pointer}
+nav button.act{background:var(--or);border-color:var(--or);color:#fff}
+main{max-width:1000px;margin:auto;padding:16px}
+h2{color:var(--navy);margin:24px 0 8px;font-size:1.15rem}
+.pause{background:#fff;border:1px solid var(--bd);border-radius:12px;margin-bottom:16px;overflow:hidden}
+.ph{background:#F2F4F7;padding:12px 16px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-weight:700;color:var(--navy)}
+.pack{padding:10px 16px;font-size:.85rem;color:var(--mut);border-bottom:1px dashed var(--bd)}
+.pack b{color:#0F172A}
+.o{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--bd);align-items:flex-start}
+.o:last-child{border:0}.o.done{opacity:.45}.o.done .w{text-decoration:line-through}
+.o input{width:24px;height:24px;margin-top:2px;accent-color:var(--ok);flex:none}
+.w{flex:1;font-size:.92rem;line-height:1.5}.w small{color:var(--mut)}
+.sum{font-weight:800;color:var(--or);white-space:nowrap}
+.empty{text-align:center;color:var(--mut);padding:50px 10px}
+@media print{header,nav{display:none}}
+</style>
+</head>
+<body>
+<header><h1>Bestellübersicht · RC-Snackbar eSG</h1><span id="st">verbinde …</span></header>
+<nav id="nav"></nav>
+<main id="main"><div class="empty">Noch keine Bestellungen geladen …</div></main>
+
+<script>
+const TOPIC="esg-snackbar-AENDERN-7Q4X";   // exakt derselbe Kanalname wie in index.html!
+const ORDER=["1. Pause","2. Pause","Mittagspause","6. Pause (Letzte Pause)"];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const load=k=>{try{return JSON.parse(localStorage.getItem(k)||"{}")}catch(e){return{}}};
+let orders=load("esg_orders"),done=load("esg_done"),filter="heute",live=false;
+const today=()=>new Date().toLocaleDateString('sv-SE');
+
+function add(m){
+  if(orders[m.id])return;
+  const t=(m.tags||[]).filter(x=>x!=="shopping_cart");
+  orders[m.id]={id:m.id,time:m.time,title:m.title||"",text:m.message||"",datum:t[0]||"?",pause:t[1]||"?"};
+  localStorage.setItem("esg_orders",JSON.stringify(orders));
+  if(live)beep();
+  draw()}
+function beep(){try{const c=new AudioContext(),o=c.createOscillator();o.connect(c.destination);o.frequency.value=880;o.start();o.stop(c.currentTime+.25)}catch(e){}}
+
+function connect(){
+  const es=new EventSource(`https://ntfy.sh/${TOPIC}/sse?since=all`);
+  es.addEventListener("open",()=>{$("st").textContent="● live";$("st").className="on";setTimeout(()=>live=true,3000)});
+  es.addEventListener("message",e=>add(JSON.parse(e.data)));
+  es.onerror=()=>{$("st").textContent="getrennt – verbinde neu …";$("st").className=""}}
+
+function toggle(id,on){done[id]=on;localStorage.setItem("esg_done",JSON.stringify(done));draw()}
+function setF(f){filter=f;draw()}
+
+function draw(){
+  const all=Object.values(orders),t=today();
+  const list=all.filter(o=>filter==="heute"?o.datum===t:filter==="offen"?!done[o.id]:true);
+  const open=all.filter(o=>!done[o.id]).length;
+  $("nav").innerHTML=[["heute","Heute"],["offen",`Alle offenen (${open})`],["alle","Alle"]]
+    .map(([k,l])=>`<button class="${filter===k?'act':''}" onclick="setF('${k}')">${l}</button>`).join('');
+  if(!list.length){$("main").innerHTML='<div class="empty">Keine Bestellungen in dieser Ansicht.</div>';return}
+  const byDate={};list.forEach(o=>((byDate[o.datum]??={})[o.pause]??=[]).push(o));
+  $("main").innerHTML=Object.keys(byDate).sort().map(d=>{
+    const label=new Date(d+"T12:00:00").toLocaleDateString('de-DE',{weekday:'long',day:'2-digit',month:'2-digit'});
+    const ps=Object.keys(byDate[d]).sort((a,b)=>ORDER.indexOf(a)-ORDER.indexOf(b));
+    return `<h2>${d===t?'Heute · ':''}${esc(label)}</h2>`+ps.map(p=>{
+      const os=byDate[d][p].sort((a,b)=>a.time-b.time),sums={};
+      os.filter(o=>!done[o.id]).forEach(o=>[...o.text.matchAll(/^(\d+)x (.+)$/gm)].forEach(m=>sums[m[2]]=(sums[m[2]]||0)+ +m[1]));
+      const pack=Object.entries(sums).map(([n,q])=>`<b>${q}×</b> ${esc(n)}`).join(' · ');
+      return `<div class="pause"><div class="ph"><span>${esc(p)}</span><span>${os.filter(o=>!done[o.id]).length} offen / ${os.length}</span></div>
+      ${pack?`<div class="pack">Zum Herrichten: ${pack}</div>`:''}
+      ${os.map(o=>{const L=o.text.split('\n'),sum=(o.text.match(/^Summe: (.+)$/m)||[])[1]||'',nr=(o.text.match(/^Nr: (.+)$/m)||[])[1]||'';
+        const items=L.filter(l=>/^\d+x /.test(l)).map(esc).join('<br>');
+        return `<label class="o ${done[o.id]?'done':''}"><input type="checkbox" ${done[o.id]?'checked':''} onchange="toggle('${o.id}',this.checked)">
+        <div class="w"><b>${esc(L[0])}</b> <small>${esc(nr)} · ${new Date(o.time*1000).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</small><br>${items}</div><div class="sum">${esc(sum)}</div></label>`}).join('')}</div>`}).join('')}).join('')}
+
+draw();connect();
+</script>
+</body>
+</html>
